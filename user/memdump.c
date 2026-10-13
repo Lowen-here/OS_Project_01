@@ -60,6 +60,98 @@ main(int argc, char *argv[])
 void
 memdump(char *fmt, char *data, int len)
 {
-  // Your code here.  `data` holds `len` valid bytes.
+  int offset = 0;
+
+  for (int j = 0; fmt[j] != '\0'; j++) {
+
+    if (fmt[j] == 'i') {
+
+      // Kiểm tra còn đủ 4 byte không
+      if (len - offset < 4) {
+        printf("memdump: not enough data for 'i'\n");
+        return;
+      }
+
+      // Đọc 4 byte thành số nguyên
+      int value = *(int *)(data + offset);
+
+      // In giá trị
+      printf("%d\n", value);
+
+      // Di chuyển đến vị trí tiếp theo
+      offset += 4;
+    }
+  
+    else if (fmt[j] == 'h') {
+
+      if (len - offset < 2) {
+        printf("memdump: not enough data for 'h'\n");
+        return;
+      }
+
+      short value = *(short *)(data + offset);
+
+      printf("%d\n", value);
+
+      offset += 2;
+    }
+
+    else if (fmt[j] == 'c') {
+
+      if (len - offset < 1) {
+        printf("memdump: not enough data for 'c'\n");
+        return;
+      }
+
+      char value = *(data + offset);
+
+      printf("%c\n", value);
+
+      offset += 1;
+    }
+
+    else if (fmt[j] == 'p') {
+
+      if (len - offset < 8) {
+        printf("memdump: not enough data for 'p'\n");
+        return;
+      }
+
+      uint64 value = *(uint64 *)(data + offset);
+
+      printf("%lx\n", value);
+
+      offset += 8;
+    }
+
+    else if (fmt[j] == 's') {
+
+      if (len - offset < 8) {
+        printf("memdump: not enough data for 's'\n");
+        return;
+      }
+
+      char *value = *(char **)(data + offset);
+
+      printf("%s\n", value);
+
+      offset += 8;
+    }
+
+    else if (fmt[j] == 'S') {
+
+      while (offset < len && data[offset] != '\0') {
+        printf("%c", data[offset]);
+        offset++;
+      }
+
+      printf("\n");
+
+      if (offset < len && data[offset] == '\0') {
+        offset++;
+      }
+    }
+  }
+
 
 }
