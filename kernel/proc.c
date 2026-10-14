@@ -98,7 +98,6 @@ allocpid()
   pid = nextpid;
   nextpid = nextpid + 1;
   release(&pid_lock);
-
   return pid;
 }
 
@@ -131,6 +130,10 @@ found:
     release(&p->lock);
     return 0;
   }
+
+#ifdef LAB_LOCK
+  p->pincpu = 0;
+#endif
 
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
@@ -201,6 +204,7 @@ proc_pagetable(struct proc *p)
     return 0;
   }
 
+
   return pagetable;
 }
 
@@ -240,7 +244,7 @@ growproc(int n)
 
   sz = p->sz;
   if (n > 0) {
-    if (sz + n > TRAPFRAME) {
+    if (sz + n > UTOP) {
       return -1;
     }
     if ((sz = uvmalloc(p->pagetable, sz, sz + n, PTE_W)) == 0) {
@@ -275,6 +279,7 @@ kfork(void)
   }
   np->sz = p->sz;
 
+
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
@@ -299,6 +304,7 @@ kfork(void)
 
   acquire(&np->lock);
   np->state = RUNNABLE;
+
   release(&np->lock);
 
   return pid;
@@ -338,6 +344,7 @@ kexit(int status)
       p->ofile[fd] = 0;
     }
   }
+
 
   begin_op();
   iput(p->cwd);
@@ -441,15 +448,25 @@ scheduler(void)
     intr_on();
     intr_off();
 
-    int found = 0;
+    int nproc = 0;
     for (p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
+      if (p->state != UNUSED) {
+        nproc++;
+      }
+#ifdef LAB_LOCK
+      if (p->pincpu && p->pincpu != c) {
+        release(&p->lock);
+        continue;
+      }
+#endif
       if (p->state == RUNNABLE) {
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+
         swtch(&c->context, &p->context);
 
         // Don't re-enable interrupts on release.
@@ -458,13 +475,15 @@ scheduler(void)
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
-        found = 1;
       }
       release(&p->lock);
     }
-    if (found == 0) {
+    if (nproc <= 2) { // only init and sh exist
       // nothing to run; stop running on this core until an interrupt.
+      intr_on();
+#ifndef LAB_FS
       asm volatile("wfi");
+#endif
     }
   }
 }
@@ -699,3 +718,4 @@ procdump(void)
     printk("\n");
   }
 }
+

@@ -1,10 +1,13 @@
 #include "types.h"
 #include "riscv.h"
-#include "defs.h"
 #include "param.h"
+#include "defs.h"
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
+#ifdef PGTBL_SOL
+#include "riscv.h"
+#endif
 #include "vm.h"
 
 uint64
@@ -57,7 +60,7 @@ sys_sbrk(void)
     // memory, vmfault() will allocate it.
     if (addr + n < addr)
       return -1;
-    if (addr + n > TRAPFRAME)
+    if (addr + n > UTOP)
       return -1;
     myproc()->sz += n;
   }
@@ -69,6 +72,7 @@ sys_pause(void)
 {
   int n;
   uint ticks0;
+
 
   argint(0, &n);
   if (n < 0)
@@ -88,6 +92,28 @@ sys_pause(void)
   release(&tickslock);
   return 0;
 }
+
+
+#ifdef LAB_PGTBL
+int
+sys_vmprint(void)
+{
+  struct proc *p;
+
+  p = myproc();
+  vmprint(p->pagetable);
+  return 0;
+}
+#endif
+
+#ifdef LAB_PGTBL
+int
+sys_pgaccess(void)
+{
+  // lab pgtbl: your code here.
+  return 0;
+}
+#endif
 
 uint64
 sys_kill(void)
@@ -110,3 +136,20 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+#ifdef LAB_LOCK
+uint64
+sys_cpupin(void)
+{
+  struct proc *p = myproc();
+  int cpu;
+
+  argint(0, &cpu);
+  if (cpu < 0 || cpu >= NCPU)
+    return -1;
+  acquire(&p->lock);
+  p->pincpu = &cpus[cpu];
+  release(&p->lock);
+  return 0;
+}
+#endif

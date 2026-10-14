@@ -25,6 +25,10 @@
 #define VIRTIO0     0x10001000
 #define VIRTIO0_IRQ 1
 
+#ifdef LAB_NET
+#define TULIP_IRQ 33
+#endif
+
 // core-local interrupt controller (CLINT)
 #define CLINT_BASE  0x02000000L
 #define CLINT(hart) (CLINT_BASE + (hart) * 4)
@@ -49,7 +53,7 @@
 
 // map kernel stacks beneath the trampoline,
 // each surrounded by invalid guard pages.
-#define KSTACK(p) (TRAMPOLINE - ((p) + 1) * 2 * PGSIZE)
+#define KSTACK(p) (TRAMPOLINE - (p) * 2 * PGSIZE - 3 * PGSIZE)
 
 // User memory layout.
 // Address zero first:
@@ -58,6 +62,17 @@
 //   fixed-size stack
 //   expandable heap
 //   ...
+//   USYSCALL (shared with kernel)
 //   TRAPFRAME (p->trapframe, used by the trampoline)
 //   TRAMPOLINE (the same page as in the kernel)
 #define TRAPFRAME (TRAMPOLINE - PGSIZE)
+#ifdef LAB_PGTBL
+#define USYSCALL (TRAPFRAME - PGSIZE)
+#define UTOP (USYSCALL)
+
+struct usyscall {
+  int pid; // Process ID
+};
+#else
+#define UTOP (TRAPFRAME)
+#endif

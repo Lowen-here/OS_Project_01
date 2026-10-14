@@ -62,3 +62,11 @@ kernelvec:
 
         # return to whatever we were doing in the kernel.
         sret
+
+.globl kernelmvec
+.align 4
+kernelmvec:
+        # return, but MSIP is not cleared, so this hart will
+        # keep jumping to kernelmvec until some other core
+        # clears MSIP.
+        mret

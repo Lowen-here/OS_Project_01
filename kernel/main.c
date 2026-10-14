@@ -12,6 +12,9 @@ main()
 {
   if (cpuid() == 0) {
     consoleinit();
+#if defined(LAB_LOCK)
+    statsinit();
+#endif
     printkinit();
     printk("\n");
     printk("xv6 kernel is booting\n");
@@ -28,7 +31,14 @@ main()
     iinit();            // inode table
     fileinit();         // file table
     virtio_disk_init(); // emulated hard disk
-    userinit();         // first user process
+#ifdef LAB_NET
+    pci_init();
+    netinit();
+#endif
+    userinit(); // first user process
+#ifdef KCSAN
+    kcsaninit();
+#endif
 
     __atomic_store_n(&started, 1, __ATOMIC_RELEASE);
   } else {
