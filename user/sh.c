@@ -15,6 +15,21 @@
 
 #define MAXARGS 10
 
+// Command history storage.
+#define HISTORY_SIZE 10
+#define HISTORY_CMD_LEN 100
+
+static char history[HISTORY_SIZE][HISTORY_CMD_LEN];
+
+// Number of commands currently stored.
+static int history_count = 0;
+
+// Index where the next command will be stored.
+static int history_next = 0;
+
+// Total number of commands saved by this shell.
+static int history_total = 0;
+
 struct cmd {
   int type;
 };
@@ -162,6 +177,94 @@ find_completion_start(char *buf, int len, int *is_first_word)
   return start;
 }
 
+// Save a command in the circular history buffer.
+void
+history_add(char *cmd)
+{
+  int len;
+
+  if (cmd == 0)
+    return;
+
+  len = strlen(cmd);
+
+  // Do not save empty commands.
+  if (len == 0)
+    return;
+
+  // Reject commands that exceed the storage capacity.
+  if (len >= HISTORY_CMD_LEN)
+    return;
+
+  // Copy the command into the next available slot.
+  strcpy(history[history_next], cmd);
+
+  // Move to the next slot, wrapping around if necessary.
+  history_next = (history_next + 1) % HISTORY_SIZE;
+
+  // Increase stored count until the buffer becomes full.
+  if (history_count < HISTORY_SIZE)
+    history_count++;
+
+  // Keep a monotonically increasing command number.
+  history_total++;
+}
+
+
+// Retrieve a command by its absolute history number.
+// Return 0 if the requested command is unavailable.
+char *
+history_get(int number)
+{
+  int oldest_number;
+  int oldest_index;
+  int offset;
+  int index;
+
+  if (history_count == 0)
+    return 0;
+
+  // Determine the number of the oldest stored command.
+  oldest_number = history_total - history_count + 1;
+
+  // Reject invalid or overwritten history numbers.
+  if (number < oldest_number || number > history_total)
+    return 0;
+
+  // Find the physical index of the oldest command.
+  oldest_index =
+    (history_next - history_count + HISTORY_SIZE) % HISTORY_SIZE;
+
+  // Calculate the requested command's offset.
+  offset = number - oldest_number;
+
+  index = (oldest_index + offset) % HISTORY_SIZE;
+
+  return history[index];
+}
+
+// Print stored commands from oldest to newest.
+void
+history_print(void)
+{
+  int oldest_number;
+  int number;
+  char *cmd;
+
+  if (history_count == 0) {
+    printf("history: empty\n");
+    return;
+  }
+
+  oldest_number = history_total - history_count + 1;
+
+  for (number = oldest_number; number <= history_total; number++) {
+    cmd = history_get(number);
+
+    if (cmd != 0)
+      printf("%d %s\n", number, cmd);
+  }
+}
 
 // Check whether name starts with prefix.
 int
@@ -323,6 +426,33 @@ complete_input(char *buf, int *len, int nbuf)
   write(1, buf, *len);
 }
 
+// Replace the current interactive input line.
+void
+replace_input_line(char *buf, int *len, int nbuf, char *new_line)
+{
+  int new_len;
+  int i;
+
+  new_len = strlen(new_line);
+
+  // Reserve space for newline and null terminator.
+  if (new_len > nbuf - 2)
+    return;
+
+  // Erase the current line from the terminal.
+  for (i = 0; i < *len; i++)
+    write(1, "\b \b", 3);
+
+  // Copy the new command into the input buffer.
+  memmove(buf, new_line, new_len);
+  buf[new_len] = 0;
+
+  *len = new_len;
+
+  // Display the replacement command.
+  write(1, buf, *len);
+}
+
 // Read and edit one interactive command line.
 int
 read_interactive(char *buf, int nbuf)
@@ -331,8 +461,14 @@ read_interactive(char *buf, int nbuf)
   int n;
   char c;
   int esc_state = 0;
+  int history_pos = 0;
+  char draft[100];
 
   memset(buf, 0, nbuf);
+
+  history_pos = history_total;
+  draft[0] = 0; 
+
 
   while (1) {
     n = read(0, &c, 1);
@@ -340,22 +476,71 @@ read_interactive(char *buf, int nbuf)
     if (n != 1)
       return -1;
 
-    // Ignore escape sequences for now.
-    // Arrow-key handling will be added in Task 3C.
-    if (esc_state == 1) {
-      if (c == '[') {
-        esc_state = 2;
+    // Handle escape sequences for arrow keys.
+  if (esc_state == 1) {
+    if (c == '[') {
+      esc_state = 2;
+      continue;
+    }
+
+    esc_state = 0;
+    continue;
+  }
+
+  if (esc_state == 2) {
+    char *saved;
+    int oldest_number;
+
+    esc_state = 0;
+
+    oldest_number = history_total - history_count + 1;
+
+    // Arrow Up: move to an older command.
+    if (c == 'A') {
+      if (history_count == 0)
+        continue;
+
+      // Save the current draft before entering History.
+      if (history_pos == history_total + 1) {
+        strcpy(draft, buf);
+      }
+
+      if (history_pos > oldest_number)
+        history_pos--;
+
+      saved = history_get(history_pos);
+
+      if (saved != 0)
+        replace_input_line(buf, &len, nbuf, saved);
+
+      continue;
+    }
+
+    // Arrow Down: move to a newer command.
+    if (c == 'B') {
+      if (history_pos == history_total + 1)
+        continue;
+
+      if (history_pos < history_total)
+        history_pos++;
+
+      else {
+        history_pos = history_total + 1;
+        replace_input_line(buf, &len, nbuf, draft);
         continue;
       }
 
-      esc_state = 0;
+      saved = history_get(history_pos);
+
+      if (saved != 0)
+        replace_input_line(buf, &len, nbuf, saved);
+
       continue;
     }
 
-    if (esc_state == 2) {
-      esc_state = 0;
-      continue;
-    }
+    // Ignore unsupported escape sequences.
+    continue;
+  }
 
     if (c == '\x1b') {
       esc_state = 1;
@@ -473,21 +658,108 @@ main(void)
   // Read and run input commands.
   while (getcmd(buf, sizeof(buf)) >= 0) {
     char *cmd = buf;
+    char *saved;
+    int len;
+    int number;
+    int i;
+    int digit;
+    int valid;
+
+    // Remove leading spaces and tabs.
     while (*cmd == ' ' || *cmd == '\t')
       cmd++;
-    if (*cmd == '\n') // is a blank command
+
+    // Remove trailing whitespace and newline.
+    len = strlen(cmd);
+
+    while (len > 0 &&
+           (cmd[len - 1] == '\n' ||
+            cmd[len - 1] == '\r' ||
+            cmd[len - 1] == ' ' ||
+            cmd[len - 1] == '\t')) {
+      cmd[--len] = 0;
+    }
+
+    // Ignore empty commands.
+    if (len == 0)
       continue;
-    if (cmd[0] == 'c' && cmd[1] == 'd' && cmd[2] == ' ') {
-      // Chdir must be called by the parent, not the child.
-      cmd[strlen(cmd) - 1] = 0; // chop \n
+
+    // Built-in: history.
+    if (strcmp(cmd, "history") == 0) {
+      history_print();
+      continue;
+    }
+
+    // History expansion: !! or !n.
+    if (cmd[0] == '!') {
+
+      if (strcmp(cmd, "!!") == 0) {
+        // Recall the most recent command.
+        number = history_total;
+      } else {
+        // Parse the number after '!'.
+        number = 0;
+        valid = (cmd[1] != 0);
+
+        for (i = 1; cmd[i] != 0; i++) {
+          if (cmd[i] < '0' || cmd[i] > '9') {
+            valid = 0;
+            break;
+          }
+
+          digit = cmd[i] - '0';
+
+          // Reject a number larger than history_total.
+          // This also avoids integer overflow.
+          if (number > history_total / 10 ||
+              (number == history_total / 10 &&
+               digit > history_total % 10)) {
+            valid = 0;
+            break;
+          }
+
+          number = number * 10 + digit;
+        }
+
+        if (!valid) {
+          fprintf(2, "history: invalid reference\n");
+          continue;
+        }
+      }
+
+      saved = history_get(number);
+
+      if (saved == 0) {
+        fprintf(2, "history: command not found\n");
+        continue;
+      }
+
+      // Copy before saving again: history_add()
+      // may overwrite an entry in the circular buffer.
+      memmove(buf, saved, strlen(saved) + 1);
+      cmd = buf;
+
+      // Show the expanded command.
+      printf("%s\n", cmd);
+    }
+
+    // Save the actual command, not the !n reference.
+    history_add(cmd);
+
+    // Built-in: cd must run in the parent shell.
+    if (cmd[0] == 'c' &&
+        cmd[1] == 'd' &&
+        cmd[2] == ' ') {
       if (chdir(cmd + 3) < 0)
         fprintf(2, "cannot cd %s\n", cmd + 3);
     } else {
       if (fork1() == 0)
         runcmd(parsecmd(cmd));
+
       wait(0);
     }
   }
+
   exit(0);
 }
 
