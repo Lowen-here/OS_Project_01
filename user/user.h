@@ -25,6 +25,7 @@ char *sys_sbrk(int, int);
 int pause(int);
 int uptime(void);
 int sync(void);
+int consolemode(int mode);
 
 // ulib.c
 int stat(const char *, struct stat *);

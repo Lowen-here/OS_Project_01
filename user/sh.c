@@ -132,20 +132,133 @@ runcmd(struct cmd *cmd)
   exit(0);
 }
 
+
+// Read and edit one interactive command line.
+int
+read_interactive(char *buf, int nbuf)
+{
+  int len = 0;
+  int n;
+  char c;
+  int esc_state = 0;
+
+  memset(buf, 0, nbuf);
+
+  while (1) {
+    n = read(0, &c, 1);
+
+    if (n != 1)
+      return -1;
+
+    // Ignore escape sequences for now.
+    // Arrow-key handling will be added in Task 3C.
+    if (esc_state == 1) {
+      if (c == '[') {
+        esc_state = 2;
+        continue;
+      }
+
+      esc_state = 0;
+      continue;
+    }
+
+    if (esc_state == 2) {
+      esc_state = 0;
+      continue;
+    }
+
+    if (c == '\x1b') {
+      esc_state = 1;
+      continue;
+    }
+
+    // Enter: finish the command line.
+    if (c == '\n' || c == '\r') {
+      write(1, "\n", 1);
+
+      buf[len++] = '\n';
+      buf[len] = 0;
+
+      return 0;
+    }
+
+    // Backspace: remove the last character.
+    if (c == '\x7f' || c == '\b') {
+      if (len > 0) {
+        len--;
+        buf[len] = 0;
+        write(1, "\b \b", 3);
+      }
+      continue;
+    }
+
+    // Ctrl+D: EOF when the current line is empty.
+    if (c == 4) {
+      if (len == 0)
+        return -1;
+
+      continue;
+    }
+
+    // Ctrl+U: clear the current input line.
+    if (c == 21) {
+      while (len > 0) {
+        len--;
+        buf[len] = 0;
+        write(1, "\b \b", 3);
+      }
+      continue;
+    }
+
+    // Tab completion will be implemented in Task 3B.
+    if (c == '\t')
+      continue;
+
+    // Ignore other control characters.
+    if ((unsigned char)c < 32)
+      continue;
+
+    // Reserve space for newline and null terminator.
+    if (len >= nbuf - 2)
+      continue;
+
+    buf[len++] = c;
+    buf[len] = 0;
+
+    // Kernel echo is disabled in interactive mode.
+    write(1, &c, 1);
+  }
+}
+
 int
 getcmd(char *buf, int nbuf)
 {
   struct stat st;
+  int interactive = 0;
+  int result;
 
-  // Print prompt only when stdin is a device.
   if (fstat(0, &st) >= 0 && st.type == T_DEVICE) {
     write(2, "$ ", 2);
+    interactive = 1;
   }
 
+  if (interactive && consolemode(1) == 0) {
+    result = read_interactive(buf, nbuf);
+
+    // Restore normal console input before executing commands.
+    if (consolemode(0) < 0) {
+      fprintf(2, "sh: cannot restore console mode\n");
+      return -1;
+    }
+
+    return result;
+  }
+
+  // Keep the original line-input behavior for scripts.
   memset(buf, 0, nbuf);
   gets(buf, nbuf);
 
-  if (buf[0] == 0) // EOF
+  if (buf[0] == 0)
     return -1;
 
   return 0;

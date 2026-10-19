@@ -204,7 +204,7 @@ UPROGS=\
 	$U/_dorphan\
 	$U/_sync\
 	$U/_find\
-
+	$U/_testcmode\
 
 
 

@@ -53,6 +53,8 @@ struct {
   uint r; // Read index
   uint w; // Write index
   uint e; // Edit index
+
+  int interactive_owner_pid;
 } cons;
 
 //
@@ -90,48 +92,68 @@ consoleread(int user_dst, uint64 dst, int n)
   uint target;
   int c;
   char cbuf;
+  int pid = myproc()->pid;
 
   target = n;
   acquire(&cons.lock);
+
   while (n > 0) {
-    // wait until interrupt handler has put some
-    // input into cons.buffer.
+    // Interactive input belongs to its owning process.
+    if (cons.interactive_owner_pid != 0 &&
+        cons.interactive_owner_pid != pid) {
+      int copied = target - n;
+      release(&cons.lock);
+      return copied > 0 ? copied : -1;
+    }
+
+    // Wait until input is available.
     while (cons.r == cons.w) {
       if (killed(myproc())) {
         release(&cons.lock);
         return -1;
       }
+
       sleep_prepare(&cons.r);
       release(&cons.lock);
       sleep();
       acquire(&cons.lock);
+
+      // Ownership may have changed while sleeping.
+      if (cons.interactive_owner_pid != 0 &&
+          cons.interactive_owner_pid != pid) {
+        int copied = target - n;
+        release(&cons.lock);
+        return copied > 0 ? copied : -1;
+      }
     }
+
+    int interactive =
+      (cons.interactive_owner_pid == pid);
 
     c = cons.buf[cons.r++ % INPUT_BUF_SIZE];
 
-    if (c == C('D')) { // end-of-file
+    // Keep the original Ctrl+D behavior in normal mode.
+    if (!interactive && c == C('D')) {
       if (n < target) {
-        // Save ^D for next time, to make sure
-        // caller gets a 0-byte result.
         cons.r--;
       }
       break;
     }
 
-    // copy the input byte to the user-space buffer.
     cbuf = c;
+
     if (either_copyout(user_dst, dst, &cbuf, 1) == -1)
       break;
 
     dst++;
     --n;
 
-    if (c == '\n') {
-      // a whole line has arrived, return to
-      // the user-level read().
+    // In interactive mode, return after one character.
+    // In normal mode, retain the original newline behavior.
+    if (interactive || c == '\n')
       break;
-    }
   }
+
   release(&cons.lock);
 
   return target - n;
@@ -147,6 +169,20 @@ void
 consoleintr(int c)
 {
   acquire(&cons.lock);
+
+  // Interactive mode: deliver input bytes without kernel editing/echo.
+  if (cons.interactive_owner_pid != 0) {
+    if (c != 0 && cons.e - cons.r < INPUT_BUF_SIZE) {
+      cons.buf[cons.e++ % INPUT_BUF_SIZE] = c;
+
+      // Make this byte immediately available to read().
+      cons.w = cons.e;
+      wakeup(&cons.r);
+    }
+
+    release(&cons.lock);
+    return;
+  }
 
   switch (c) {
   case C('P'): // Print process list.
@@ -193,6 +229,7 @@ void
 consoleinit(void)
 {
   initlock(&cons.lock, "cons");
+  cons.interactive_owner_pid = 0;
 
   uartinit();
 
@@ -200,4 +237,76 @@ consoleinit(void)
   // to consoleread and consolewrite.
   devsw[CONSOLE].read = consoleread;
   devsw[CONSOLE].write = consolewrite;
+}
+
+
+int
+consolemode_set(int mode)
+{
+  struct proc *p = myproc();
+  int pid = p->pid;
+
+  if (mode != 0 && mode != 1)
+    return -1;
+
+  // Only a process reading from the console may use this mode.
+  struct file *f = p->ofile[0];
+
+  if (f == 0 ||
+      f->type != FD_DEVICE ||
+      f->major != CONSOLE ||
+      !f->readable)
+    return -1;
+
+  acquire(&cons.lock);
+
+  if (mode == 1) {
+    if (cons.interactive_owner_pid != 0 &&
+        cons.interactive_owner_pid != pid) {
+      release(&cons.lock);
+      return -1;
+    }
+
+    // Do not switch modes with unprocessed input.
+    if (cons.interactive_owner_pid == 0 &&
+        (cons.r != cons.w || cons.w != cons.e)) {
+      release(&cons.lock);
+      return -1;
+    }
+
+    cons.interactive_owner_pid = pid;
+  } else {
+    if (cons.interactive_owner_pid != pid) {
+      release(&cons.lock);
+      return -1;
+    }
+
+    // Discard unread interactive input before returning to line mode.
+    cons.r = cons.e;
+    cons.w = cons.e;
+    cons.interactive_owner_pid = 0;
+  }
+
+  // Recheck the mode and ownership in any waiting console reads.
+  wakeup(&cons.r);
+
+  release(&cons.lock);
+  return 0;
+}
+
+void
+consolemode_release(int pid)
+{
+  acquire(&cons.lock);
+
+  if (cons.interactive_owner_pid == pid) {
+    // Discard unread input before restoring normal mode.
+    cons.r = cons.e;
+    cons.w = cons.e;
+
+    cons.interactive_owner_pid = 0;
+    wakeup(&cons.r);
+  }
+
+  release(&cons.lock);
 }

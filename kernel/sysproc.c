@@ -110,3 +110,17 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+
+uint64
+sys_consolemode(void)
+{
+  int mode;
+
+  argint(0, &mode);
+
+  if (mode != 0 && mode != 1)
+    return -1;
+
+  return consolemode_set(mode);
+}
