@@ -684,12 +684,6 @@ main(void)
     if (len == 0)
       continue;
 
-    // Built-in: history.
-    if (strcmp(cmd, "history") == 0) {
-      history_print();
-      continue;
-    }
-
     // History expansion: !! or !n.
     if (cmd[0] == '!') {
 
@@ -743,10 +737,16 @@ main(void)
       printf("%s\n", cmd);
     }
 
-    // Save the actual command, not the !n reference.
-    history_add(cmd);
+  // Save the actual command, including "history".
+  history_add(cmd);
 
-    // Built-in: cd must run in the parent shell.
+  // Built-in: history.
+  if (strcmp(cmd, "history") == 0) {
+    history_print();
+    continue;
+  }
+
+  // Built-in: cd must run in the parent shell.
     if (cmd[0] == 'c' &&
         cmd[1] == 'd' &&
         cmd[2] == ' ') {
