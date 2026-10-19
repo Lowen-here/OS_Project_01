@@ -4,6 +4,7 @@
 #include "user/user.h"
 #include "kernel/fcntl.h"
 #include "kernel/stat.h"
+#include "kernel/fs.h"
 
 // Parsed command representation
 #define EXEC  1
@@ -133,6 +134,195 @@ runcmd(struct cmd *cmd)
 }
 
 
+// Find the beginning of the word being completed.
+// Also determine whether this is the first word in the command line.
+int
+find_completion_start(char *buf, int len, int *is_first_word)
+{
+  int start = len;
+  int i;
+
+  // Move backward to find the beginning of the current word.
+  while (start > 0 &&
+         buf[start - 1] != ' ' &&
+         buf[start - 1] != '\t') {
+    start--;
+  }
+
+  // Check whether any previous word exists.
+  *is_first_word = 1;
+
+  for (i = 0; i < start; i++) {
+    if (buf[i] != ' ' && buf[i] != '\t') {
+      *is_first_word = 0;
+      break;
+    }
+  }
+
+  return start;
+}
+
+
+// Check whether name starts with prefix.
+int
+match_prefix(char *name, char *prefix)
+{
+  int i = 0;
+
+  while (prefix[i] != 0) {
+    if (name[i] == 0 || name[i] != prefix[i])
+      return 0;
+
+    i++;
+  }
+
+  return 1;
+}
+
+// Scan a directory for names beginning with prefix.
+// Return the number of matches.
+// If exactly one match exists, its name is available in result.
+int
+scan_completions(char *dir, char *prefix, char *result)
+{
+  int fd;
+  int count = 0;
+  struct dirent de;
+  struct stat st;
+  char name[DIRSIZ + 1];
+
+  result[0] = 0;
+
+  fd = open(dir, O_RDONLY);
+  if (fd < 0)
+    return 0;
+
+  if (fstat(fd, &st) < 0 || st.type != T_DIR) {
+    close(fd);
+    return 0;
+  }
+
+  while (read(fd, &de, sizeof(de)) == sizeof(de)) {
+    if (de.inum == 0)
+      continue;
+
+    memmove(name, de.name, DIRSIZ);
+    name[DIRSIZ] = 0;
+
+    // Ignore "." and "..".
+    if (strcmp(name, ".") == 0 ||
+        strcmp(name, "..") == 0)
+      continue;
+
+    if (match_prefix(name, prefix)) {
+      count++;
+
+      // Save the first matching name.
+      if (count == 1)
+        strcpy(result, name);
+    }
+  }
+
+  close(fd);
+  return count;
+}
+
+// Display all directory entries matching the prefix.
+void
+print_completions(char *dir, char *prefix)
+{
+  int fd;
+  struct dirent de;
+  struct stat st;
+  char name[DIRSIZ + 1];
+
+  fd = open(dir, O_RDONLY);
+  if (fd < 0)
+    return;
+
+  if (fstat(fd, &st) < 0 || st.type != T_DIR) {
+    close(fd);
+    return;
+  }
+
+  while (read(fd, &de, sizeof(de)) == sizeof(de)) {
+    if (de.inum == 0)
+      continue;
+
+    memmove(name, de.name, DIRSIZ);
+    name[DIRSIZ] = 0;
+
+    if (strcmp(name, ".") == 0 ||
+        strcmp(name, "..") == 0)
+      continue;
+
+    if (match_prefix(name, prefix))
+      printf("%s\n", name);
+  }
+
+  close(fd);
+}
+
+// Handle Tab completion for the current input line.
+void
+complete_input(char *buf, int *len, int nbuf)
+{
+  int start;
+  int first_word;
+  int count;
+  int prefix_len;
+  int match_len;
+  int i;
+
+  char result[DIRSIZ + 1];
+  char prefix[DIRSIZ + 1];
+  char *dir;
+
+  start = find_completion_start(buf, *len, &first_word);
+  prefix_len = *len - start;
+
+  // File names in xv6 cannot exceed DIRSIZ.
+  if (prefix_len > DIRSIZ)
+    return;
+
+  memmove(prefix, buf + start, prefix_len);
+  prefix[prefix_len] = 0;
+
+  dir = first_word ? "/" : ".";
+
+  count = scan_completions(dir, prefix, result);
+
+  if (count == 0)
+    return;
+
+  if (count == 1) {
+    match_len = strlen(result);
+
+    // Reserve space for newline and null terminator.
+    if (start + match_len > nbuf - 2)
+      return;
+
+    // Append only the missing characters.
+    for (i = prefix_len; i < match_len; i++) {
+      buf[*len] = result[i];
+      write(1, &result[i], 1);
+      (*len)++;
+    }
+
+    buf[*len] = 0;
+    return;
+  }
+
+  // Multiple matches: display candidates and restore input.
+  write(1, "\n", 1);
+
+  print_completions(dir, prefix);
+
+  // Redisplay prompt and current input.
+  write(2, "$ ", 2);
+  write(1, buf, *len);
+}
+
 // Read and edit one interactive command line.
 int
 read_interactive(char *buf, int nbuf)
@@ -210,9 +400,11 @@ read_interactive(char *buf, int nbuf)
       continue;
     }
 
-    // Tab completion will be implemented in Task 3B.
-    if (c == '\t')
+    // Handle Tab completion.
+    if (c == '\t') {
+      complete_input(buf, &len, nbuf);
       continue;
+    }
 
     // Ignore other control characters.
     if ((unsigned char)c < 32)
