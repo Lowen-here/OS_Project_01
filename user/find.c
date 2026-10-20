@@ -104,7 +104,10 @@ find(char *path, char *target, char **cmd_argv)
   }
 
   // Ensure enough space for the pathname and an entry name.
-  if (strlen(path) + 1 + DIRSIZ + 1 > sizeof(buf)) {
+  int path_len = strlen(path);
+  int need_slash = (path_len > 0 && path[path_len - 1] != '/');
+
+  if (path_len + need_slash + DIRSIZ + 1 > sizeof(buf)) {
     fprintf(2, "find: path too long\n");
     close(fd);
     return;
@@ -112,6 +115,9 @@ find(char *path, char *target, char **cmd_argv)
 
   strcpy(buf, path);
   p = buf + strlen(buf);
+
+  // Add '/' only if the path does not already end with '/'.
+  if (p > buf && *(p - 1) != '/')
   *p++ = '/';
 
   // Read all directory entries.

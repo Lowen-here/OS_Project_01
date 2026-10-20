@@ -461,12 +461,11 @@ read_interactive(char *buf, int nbuf)
   int n;
   char c;
   int esc_state = 0;
-  int history_pos = 0;
+  int history_pos = history_total + 1;
   char draft[100];
 
   memset(buf, 0, nbuf);
-
-  history_pos = history_total;
+  
   draft[0] = 0; 
 
 
