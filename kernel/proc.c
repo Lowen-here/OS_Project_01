@@ -110,7 +110,7 @@ static struct proc *
 allocproc(void)
 {
   struct proc *p;
-
+  
   for (p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
     if (p->state == UNUSED) {
@@ -124,6 +124,8 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
+  p->sandbox_mask = 0;
+  p->allowed_path[0] = 0;
 
   // Allocate a trapframe page.
   if ((p->trapframe = (struct trapframe *)kalloc()) == 0) {
@@ -145,7 +147,6 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
-
   return p;
 }
 
@@ -274,6 +275,9 @@ kfork(void)
     return -1;
   }
   np->sz = p->sz;
+
+  np->sandbox_mask = p->sandbox_mask;
+  safestrcpy(np->allowed_path,p->allowed_path, MAXPATH);
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);

@@ -22,8 +22,18 @@ main(int argc, char *argv[])
   char *nargv[MAXARG];
 
   if (argc < 4) {
-    usage(argv[0]);
+    fprintf(2, "Usage: sandbox mask path command [args...]\n");
+    exit(1);
   }
+  
+  if (interpose(atoi(argv[1]), argv[2]) < 0) {
+    fprintf(2, "sandbox: interpose failed\n");
+    exit(1);
+  }
+
+  exec(argv[3], &argv[3]);
+  fprintf(2, "sandbox: exec %s failed\n", argv[3]);
+  exit(1);
 
   if (argv[mask][0] < '0' || argv[mask][0] > '9') {
     usage(argv[0]);
