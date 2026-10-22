@@ -103,6 +103,7 @@ extern uint64 sys_link(void);
 extern uint64 sys_mkdir(void);
 extern uint64 sys_close(void);
 extern uint64 sys_sync(void);
+extern uint64 sys_interpose(void);
 
 // An array mapping syscall numbers from syscall.h
 // to the function that handles the system call.
@@ -130,6 +131,7 @@ static uint64 (*syscalls[])(void) = {
   [SYS_mkdir]   = sys_mkdir,
   [SYS_close]   = sys_close,
   [SYS_sync]    = sys_sync,
+  [SYS_interpose] = sys_interpose,
   // clang-format on
 };
 
@@ -143,7 +145,27 @@ syscall(void)
   if (num > 0 && num < NELEM(syscalls) && syscalls[num]) {
     // Use num to lookup the system call function for num, call it,
     // and store its return value in p->trapframe->a0
+    int allowed = 1;
+    if (p->sandbox_mask & (1<<num))
+    { 
+      allowed = 0;
+      if (num == SYS_open || num == SYS_exec)
+      {
+        char buf[MAXPATH];
+        if (p->allowed_path[0] != 0 && argstr(0, buf, MAXPATH)>=0 && strncmp(buf, p->allowed_path,MAXPATH)==0)
+        {
+          allowed = 1;
+        }
+      }
+    }
+   if (allowed)
+   {
     p->trapframe->a0 = syscalls[num]();
+   }
+   else
+   {
+    p->trapframe->a0 = -1;
+   }
   } else {
     printk("%d %s: unknown sys call %d\n", p->pid, p->name, num);
     p->trapframe->a0 = -1;
