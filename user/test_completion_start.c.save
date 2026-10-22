@@ -1,0 +1,111 @@
+#include <stdio.h>
+#include <string.h>
+
+int
+find_completion_start(char *buf, int len, int *is_first_word)
+{
+  int start = len;
+  int i;
+
+  while (start > 0 &&
+         buf[start - 1] != ' ' &&
+         buf[start - 1] != '\t') {
+    start--;
+  }
+
+  *is_first_word = 1;
+
+  for (i = 0; i < start; i++) {
+    if (buf[i] != ' ' && buf[i] != '\t') {
+      *is_first_word = 0;
+      break;
+    }
+  }
+
+  return start;
+}
+
+int
+main(void)
+{
+  char *tests[] = {
+    "ec",
+    "cat REA",
+    "echo hel",
+    "cat ",
+    "  ec",
+    "  cat   REA",
+    ""
+  };
+
+  int count = sizeof(tests) / sizeof(tests[0]);
+
+  for (int i = 0; i < count; i++) {
+ #include <stdio.h>
+#include <string.h>
+
+int
+find_completion_start(char *buf, int len, int *is_first_word)
+{
+  int start = len;
+  int i;
+
+  while (start > 0 &&
+         buf[start - 1] != ' ' &&
+         buf[start - 1] != '\t') {
+    start--;
+  }
+
+  *is_first_word = 1;
+
+  for (i = 0; i < start; i++) {
+    if (buf[i] != ' ' && buf[i] != '\t') {
+      *is_first_word = 0;
+      break;
+    }
+  }
+
+  return start;
+}
+
+int
+main(void)
+{
+  char *tests[] = {
+    "ec",
+    "cat REA",
+    "echo hel",
+    "cat ",
+    "  ec",
+    "  cat   REA",
+    ""
+  };
+
+  int count = sizeof(tests) / sizeof(tests[0]);
+
+  for (int i = 0; i < count; i++) {
+    int first;
+    int len = strlen(tests[i]);
+
+    int start = find_completion_start(tests[i], len, &first);
+
+    printf("Input: \"%s\"\n", tests[i]);
+    printf("Start: %d\n", start);
+    printf("Prefix: \"%s\"\n", tests[i] + start);
+    printf("First word: %d\n\n", first);
+  }
+
+  return 0;
+}   int first;
+    int len = strlen(tests[i]);
+
+    int start = find_completion_start(tests[i], len, &first);
+
+    printf("Input: \"%s\"\n", tests[i]);
+    printf("Start: %d\n", start);
+    printf("Prefix: \"%s\"\n", tests[i] + start);
+    printf("First word: %d\n\n", first);
+  }
+
+  return 0;
+}

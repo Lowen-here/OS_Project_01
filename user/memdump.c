@@ -137,7 +137,6 @@ memdump(char *fmt, char *data, int len)
 
       offset += 8;
     }
-
     else if (fmt[j] == 'S') {
 
       while (offset < len && data[offset] != '\0') {
