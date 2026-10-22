@@ -1,0 +1,195 @@
+diff --git a/Makefile b/Makefile
+index 0e81840..4a375d5 100644
+--- a/Makefile
++++ b/Makefile
+@@ -203,7 +203,8 @@ UPROGS=\
+ 	$U/_forphan\
+ 	$U/_dorphan\
+ 	$U/_sync\
+-
++	$U/_sandbox\
++	$U/_sbtest\
+ 
+ 
+ 
+diff --git a/kernel/proc.c b/kernel/proc.c
+index f4c1668..1a52278 100644
+--- a/kernel/proc.c
++++ b/kernel/proc.c
+@@ -110,7 +110,7 @@ static struct proc *
+ allocproc(void)
+ {
+   struct proc *p;
+-
++  
+   for (p = proc; p < &proc[NPROC]; p++) {
+     acquire(&p->lock);
+     if (p->state == UNUSED) {
+@@ -124,6 +124,8 @@ allocproc(void)
+ found:
+   p->pid = allocpid();
+   p->state = USED;
++  p->sandbox_mask = 0;
++  p->allowed_path[0] = 0;
+ 
+   // Allocate a trapframe page.
+   if ((p->trapframe = (struct trapframe *)kalloc()) == 0) {
+@@ -145,7 +147,6 @@ found:
+   memset(&p->context, 0, sizeof(p->context));
+   p->context.ra = (uint64)forkret;
+   p->context.sp = p->kstack + PGSIZE;
+-
+   return p;
+ }
+ 
+@@ -275,6 +276,9 @@ kfork(void)
+   }
+   np->sz = p->sz;
+ 
++  np->sandbox_mask = p->sandbox_mask;
++  safestrcpy(np->allowed_path,p->allowed_path, MAXPATH);
++
+   // copy saved user registers.
+   *(np->trapframe) = *(p->trapframe);
+ 
+diff --git a/kernel/proc.h b/kernel/proc.h
+index 5603697..50882d5 100644
+--- a/kernel/proc.h
++++ b/kernel/proc.h
+@@ -88,6 +88,8 @@ struct proc {
+   int killed;           // If non-zero, have been killed
+   int xstate;           // Exit status to be returned to parent's wait
+   int pid;              // Process ID
++  int sandbox_mask;   // bit i = 1 nghĩa là chặn syscall số i
++  char allowed_path[MAXPATH];
+ 
+   // wait_lock must be held when using this:
+   struct proc *parent; // Parent process
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+index 1800f20..6757f0f 100644
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -103,6 +103,7 @@ extern uint64 sys_link(void);
+ extern uint64 sys_mkdir(void);
+ extern uint64 sys_close(void);
+ extern uint64 sys_sync(void);
++extern uint64 sys_interpose(void);
+ 
+ // An array mapping syscall numbers from syscall.h
+ // to the function that handles the system call.
+@@ -130,6 +131,7 @@ static uint64 (*syscalls[])(void) = {
+   [SYS_mkdir]   = sys_mkdir,
+   [SYS_close]   = sys_close,
+   [SYS_sync]    = sys_sync,
++  [SYS_interpose] = sys_interpose,
+   // clang-format on
+ };
+ 
+@@ -143,7 +145,27 @@ syscall(void)
+   if (num > 0 && num < NELEM(syscalls) && syscalls[num]) {
+     // Use num to lookup the system call function for num, call it,
+     // and store its return value in p->trapframe->a0
++    int allowed = 1;
++    if (p->sandbox_mask & (1<<num))
++    { 
++      allowed = 0;
++      if (num == SYS_open || num == SYS_exec)
++      {
++        char buf[MAXPATH];
++        if (p->allowed_path[0] != 0 && argstr(0, buf, MAXPATH)>=0 && strncmp(buf, p->allowed_path,MAXPATH)==0)
++        {
++          allowed = 1;
++        }
++      }
++    }
++   if (allowed)
++   {
+     p->trapframe->a0 = syscalls[num]();
++   }
++   else
++   {
++    p->trapframe->a0 = -1;
++   }
+   } else {
+     printk("%d %s: unknown sys call %d\n", p->pid, p->name, num);
+     p->trapframe->a0 = -1;
+diff --git a/kernel/syscall.h b/kernel/syscall.h
+index 5a4a39f..8b4ec45 100644
+--- a/kernel/syscall.h
++++ b/kernel/syscall.h
+@@ -21,3 +21,4 @@
+ #define SYS_mkdir  20
+ #define SYS_close  21
+ #define SYS_sync   22
++#define SYS_interpose 23
+diff --git a/kernel/sysproc.c b/kernel/sysproc.c
+index cd25557..819690e 100644
+--- a/kernel/sysproc.c
++++ b/kernel/sysproc.c
+@@ -110,3 +110,20 @@ sys_uptime(void)
+   release(&tickslock);
+   return xticks;
+ }
++
++uint64
++sys_interpose(void)
++{
++  int mask;
++  argint(0, &mask);   
++  
++  char path[MAXPATH];
++  struct proc *p = myproc();
++  if (argstr(1,path,MAXPATH) < 0 )
++    return -1;
++
++ p->sandbox_mask |= mask;
++ if (p->allowed_path[0] == 0)                 
++    safestrcpy(p->allowed_path, path, MAXPATH);
++ return 0;
++}
+diff --git a/user/sandbox.c b/user/sandbox.c
+index 0cd591e..abdd672 100644
+--- a/user/sandbox.c
++++ b/user/sandbox.c
+@@ -22,9 +22,19 @@ main(int argc, char *argv[])
+   char *nargv[MAXARG];
+ 
+   if (argc < 4) {
+-    usage(argv[0]);
++    fprintf(2, "Usage: sandbox mask path command [args...]\n");
++    exit(1);
++  }
++  
++  if (interpose(atoi(argv[1]), argv[2]) < 0) {
++    fprintf(2, "sandbox: interpose failed\n");
++    exit(1);
+   }
+ 
++  exec(argv[3], &argv[3]);
++  fprintf(2, "sandbox: exec %s failed\n", argv[3]);
++  exit(1);
++
+   if (argv[mask][0] < '0' || argv[mask][0] > '9') {
+     usage(argv[0]);
+   }
+diff --git a/user/user.h b/user/user.h
+index 29aad59..8539869 100644
+--- a/user/user.h
++++ b/user/user.h
+@@ -25,6 +25,7 @@ char *sys_sbrk(int, int);
+ int pause(int);
+ int uptime(void);
+ int sync(void);
++int interpose(int, const char *);
+ 
+ // ulib.c
+ int stat(const char *, struct stat *);
+diff --git a/user/usys.pl b/user/usys.pl
+index 4d054e8..3c73f7b 100755
+--- a/user/usys.pl
++++ b/user/usys.pl
+@@ -43,3 +43,4 @@ entry("sbrk");
+ entry("pause");
+ entry("uptime");
+ entry("sync");
++entry("interpose");
