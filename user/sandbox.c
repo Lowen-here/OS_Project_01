@@ -11,8 +11,6 @@ usage(char *s)
   exit(1);
 }
 
-// Sandbox a command by disallowing system calls in mask and
-// system calls that are using path
 int
 main(int argc, char *argv[])
 {
@@ -28,20 +26,30 @@ main(int argc, char *argv[])
     usage(argv[0]);
   }
 
-  // Cấu hình interpose cho process hiện tại (hoặc process con)
-  if (interpose(atoi(argv[1]), argv[2]) < 0) {
-    fprintf(2, "sandbox: interpose failed\n");
-    exit(1);
-  }
-
   // Chuẩn bị mảng tham số cho lệnh cần chạy (bắt đầu từ argv[3])
   for (i = 3; i < argc && i - 3 < MAXARG - 1; i++) {
     nargv[i - 3] = argv[i];
   }
   nargv[argc - 3] = 0;
 
-  // Thực thi lệnh
-  exec(nargv[0], nargv);
-  fprintf(2, "sandbox: exec %s failed\n", nargv[0]);
-  exit(1);
+  int pid = fork();
+  if (pid < 0) {
+    fprintf(2, "%s: fork failed\n", argv[0]);
+    exit(1);
+  }
+  if (pid == 0) {
+    // Tiến trình con gọi interpose và exec
+    if (interpose(atoi(argv[1]), argv[2]) < 0) {
+      fprintf(2, "sandbox: interpose failed\n");
+      exit(1);
+    }
+    exec(nargv[0], nargv);
+    fprintf(2, "sandbox: exec %s failed\n", nargv[0]);
+    exit(1);
+  } else {
+    // Tiến trình cha chờ tiến trình con hoàn tất
+    wait(0);
+  }
+
+  return 0;
 }

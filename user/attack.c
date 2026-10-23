@@ -1,38 +1,57 @@
+
 #include "kernel/types.h"
-#include "kernel/fcntl.h"
 #include "user/user.h"
-#include "kernel/riscv.h"
+
+#define PGSIZE 4096
+#define MEMSIZE (64 * PGSIZE)
 
 int
 main(int argc, char *argv[])
 {
-  // Cấp phát một vùng nhớ heap rất lớn (64 trang = 256KB) để bao trùm toàn bộ không gian
-  int size = 4096 * 64;
-  char *mem = sbrk(size);
-  if(mem == (char*)-1) {
+  char *mem = sbrk(MEMSIZE);
+
+  if(mem == (char *)-1) {
     exit(1);
   }
 
-  // Quét qua toàn bộ vùng nhớ và in ra mọi chuỗi ký tự hợp lệ tìm được
-  for(int i = 0; i < size - 2; i++) {
-    int len = 0;
-    while(i + len < size) {
-      char c = mem[i + len];
-      // Kiểm tra ký tự là chữ cái (hoa/thường) hoặc chữ số
-      if((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
-        len++;
-      } else {
+  char marker[] = "Here it is: ";
+  int marker_len = sizeof(marker) - 1;
+
+  for(int i = 0; i <= MEMSIZE - marker_len; i++) {
+    int found = 1;
+
+    for(int j = 0; j < marker_len; j++) {
+      if(mem[i + j] != marker[j]) {
+        found = 0;
         break;
       }
     }
 
-    // Nếu tìm thấy chuỗi có độ dài từ 4 đến 32 ký tự, in nó ra màn hình
-    if(len >= 4 && len <= 32) {
-      for(int j = 0; j < len; j++) {
-        fprintf(1, "%c", mem[i + j]);
+    if(!found)
+      continue;
+
+    int start = i + marker_len;
+    int end = start;
+
+    while(end < MEMSIZE) {
+      char c = mem[end];
+
+      if(!((c >= 'a' && c <= 'z') ||
+           (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9'))) {
+        break;
       }
+
+      end++;
+    }
+
+    if(end > start) {
+      for(int j = start; j < end; j++) {
+        fprintf(1, "%c", mem[j]);
+      }
+
       fprintf(1, "\n");
-      // Không exit vội để in ra mọi ứng viên tiềm năng, giúp grader dễ bắt được secret
+      exit(0);
     }
   }
 

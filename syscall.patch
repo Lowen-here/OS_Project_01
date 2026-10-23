@@ -147,31 +147,160 @@ index cd25557..819690e 100644
 +    safestrcpy(p->allowed_path, path, MAXPATH);
 + return 0;
 +}
+diff --git a/user/attack.c b/user/attack.c
+index dcf0dcb..ece8e0f 100644
+--- a/user/attack.c
++++ b/user/attack.c
+@@ -1,38 +1,57 @@
++
+ #include "kernel/types.h"
+-#include "kernel/fcntl.h"
+ #include "user/user.h"
+-#include "kernel/riscv.h"
++
++#define PGSIZE 4096
++#define MEMSIZE (64 * PGSIZE)
+ 
+ int
+ main(int argc, char *argv[])
+ {
+-  // Cấp phát một vùng nhớ heap rất lớn (64 trang = 256KB) để bao trùm toàn bộ không gian
+-  int size = 4096 * 64;
+-  char *mem = sbrk(size);
+-  if(mem == (char*)-1) {
++  char *mem = sbrk(MEMSIZE);
++
++  if(mem == (char *)-1) {
+     exit(1);
+   }
+ 
+-  // Quét qua toàn bộ vùng nhớ và in ra mọi chuỗi ký tự hợp lệ tìm được
+-  for(int i = 0; i < size - 2; i++) {
+-    int len = 0;
+-    while(i + len < size) {
+-      char c = mem[i + len];
+-      // Kiểm tra ký tự là chữ cái (hoa/thường) hoặc chữ số
+-      if((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+-        len++;
+-      } else {
++  char marker[] = "Here it is: ";
++  int marker_len = sizeof(marker) - 1;
++
++  for(int i = 0; i <= MEMSIZE - marker_len; i++) {
++    int found = 1;
++
++    for(int j = 0; j < marker_len; j++) {
++      if(mem[i + j] != marker[j]) {
++        found = 0;
++        break;
++      }
++    }
++
++    if(!found)
++      continue;
++
++    int start = i + marker_len;
++    int end = start;
++
++    while(end < MEMSIZE) {
++      char c = mem[end];
++
++      if(!((c >= 'a' && c <= 'z') ||
++           (c >= 'A' && c <= 'Z') ||
++           (c >= '0' && c <= '9'))) {
+         break;
+       }
++
++      end++;
+     }
+ 
+-    // Nếu tìm thấy chuỗi có độ dài từ 4 đến 32 ký tự, in nó ra màn hình
+-    if(len >= 4 && len <= 32) {
+-      for(int j = 0; j < len; j++) {
+-        fprintf(1, "%c", mem[i + j]);
++    if(end > start) {
++      for(int j = start; j < end; j++) {
++        fprintf(1, "%c", mem[j]);
+       }
++
+       fprintf(1, "\n");
+-      // Không exit vội để in ra mọi ứng viên tiềm năng, giúp grader dễ bắt được secret
++      exit(0);
+     }
+   }
+ 
 diff --git a/user/sandbox.c b/user/sandbox.c
-index 0cd591e..abdd672 100644
+index 0cd591e..dbae8a6 100644
 --- a/user/sandbox.c
 +++ b/user/sandbox.c
-@@ -22,9 +22,19 @@ main(int argc, char *argv[])
+@@ -7,52 +7,49 @@
+ void
+ usage(char *s)
+ {
+-  fprintf(2, "Usage: %s <mask> <path> <command>\n", s);
++  fprintf(2, "Usage: %s <mask> <path> <command> [args...]\n", s);
+   exit(1);
+ }
+ 
+-// Sandbox a command by disallowing system calls in mask and
+-// system calls that are using path
+ int
+ main(int argc, char *argv[])
+ {
+   int i;
+-  int n = 2;
+-  int mask = 1;
    char *nargv[MAXARG];
  
    if (argc < 4) {
--    usage(argv[0]);
-+    fprintf(2, "Usage: sandbox mask path command [args...]\n");
-+    exit(1);
-+  }
-+  
-+  if (interpose(atoi(argv[1]), argv[2]) < 0) {
-+    fprintf(2, "sandbox: interpose failed\n");
-+    exit(1);
-   }
- 
-+  exec(argv[3], &argv[3]);
-+  fprintf(2, "sandbox: exec %s failed\n", argv[3]);
-+  exit(1);
-+
-   if (argv[mask][0] < '0' || argv[mask][0] > '9') {
      usage(argv[0]);
    }
+ 
+-  if (argv[mask][0] < '0' || argv[mask][0] > '9') {
++  // Kiểm tra mask có phải là số không
++  if (argv[1][0] < '0' || argv[1][0] > '9') {
+     usage(argv[0]);
+   }
+ 
+-  n += 1; // skip path
+-
+-  // strip off the first n arguments to sandbox
+-  for (i = n; i < argc && i < MAXARG; i++) {
+-    nargv[i - n] = argv[i];
++  // Chuẩn bị mảng tham số cho lệnh cần chạy (bắt đầu từ argv[3])
++  for (i = 3; i < argc && i - 3 < MAXARG - 1; i++) {
++    nargv[i - 3] = argv[i];
+   }
+-  nargv[argc - n] = 0;
++  nargv[argc - 3] = 0;
+ 
+   int pid = fork();
+   if (pid < 0) {
+-    printf("%s: exec fork failed\n", argv[0]);
++    fprintf(2, "%s: fork failed\n", argv[0]);
+     exit(1);
+   }
+   if (pid == 0) {
+-    if (interpose(atoi(argv[mask]), argv[mask + 1]) < 0) {
+-      printf("%s: interpose failed", argv[0]);
++    // Tiến trình con gọi interpose và exec
++    if (interpose(atoi(argv[1]), argv[2]) < 0) {
++      fprintf(2, "sandbox: interpose failed\n");
+       exit(1);
+     }
+     exec(nargv[0], nargv);
+-    printf("%s: exec %s failed\n", argv[0], nargv[0]);
++    fprintf(2, "sandbox: exec %s failed\n", nargv[0]);
+     exit(1);
+   } else {
++    // Tiến trình cha chờ tiến trình con hoàn tất
+     wait(0);
+   }
+ 
+   return 0;
+-}
++}
+\ No newline at end of file
 diff --git a/user/user.h b/user/user.h
 index 29aad59..8539869 100644
 --- a/user/user.h
