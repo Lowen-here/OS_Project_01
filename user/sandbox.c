@@ -7,7 +7,7 @@
 void
 usage(char *s)
 {
-  fprintf(2, "Usage: %s <mask> <path> <command>\n", s);
+  fprintf(2, "Usage: %s <mask> <path> <command> [args...]\n", s);
   exit(1);
 }
 
@@ -17,52 +17,31 @@ int
 main(int argc, char *argv[])
 {
   int i;
-  int n = 2;
-  int mask = 1;
   char *nargv[MAXARG];
 
   if (argc < 4) {
-    fprintf(2, "Usage: sandbox mask path command [args...]\n");
-    exit(1);
+    usage(argv[0]);
   }
-  
+
+  // Kiểm tra mask có phải là số không
+  if (argv[1][0] < '0' || argv[1][0] > '9') {
+    usage(argv[0]);
+  }
+
+  // Cấu hình interpose cho process hiện tại (hoặc process con)
   if (interpose(atoi(argv[1]), argv[2]) < 0) {
     fprintf(2, "sandbox: interpose failed\n");
     exit(1);
   }
 
-  exec(argv[3], &argv[3]);
-  fprintf(2, "sandbox: exec %s failed\n", argv[3]);
+  // Chuẩn bị mảng tham số cho lệnh cần chạy (bắt đầu từ argv[3])
+  for (i = 3; i < argc && i - 3 < MAXARG - 1; i++) {
+    nargv[i - 3] = argv[i];
+  }
+  nargv[argc - 3] = 0;
+
+  // Thực thi lệnh
+  exec(nargv[0], nargv);
+  fprintf(2, "sandbox: exec %s failed\n", nargv[0]);
   exit(1);
-
-  if (argv[mask][0] < '0' || argv[mask][0] > '9') {
-    usage(argv[0]);
-  }
-
-  n += 1; // skip path
-
-  // strip off the first n arguments to sandbox
-  for (i = n; i < argc && i < MAXARG; i++) {
-    nargv[i - n] = argv[i];
-  }
-  nargv[argc - n] = 0;
-
-  int pid = fork();
-  if (pid < 0) {
-    printf("%s: exec fork failed\n", argv[0]);
-    exit(1);
-  }
-  if (pid == 0) {
-    if (interpose(atoi(argv[mask]), argv[mask + 1]) < 0) {
-      printf("%s: interpose failed", argv[0]);
-      exit(1);
-    }
-    exec(nargv[0], nargv);
-    printf("%s: exec %s failed\n", argv[0], nargv[0]);
-    exit(1);
-  } else {
-    wait(0);
-  }
-
-  return 0;
 }
